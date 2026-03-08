@@ -35,6 +35,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .topbar .spacer{flex:1}
 .topbar label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
 .topbar input[type=checkbox]{accent-color:var(--accent)}
+.topbar .balance{font-size:12px;color:var(--muted)}
 
 /* log */
 .log{overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px}
@@ -147,6 +148,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
     <span class="dot"></span>
     <select id="mdl"><option value="">loading...</option></select>
     <span class="spacer"></span>
+    <span id="balance" class="balance"></span>
     <label><input type="checkbox" id="stm" checked> stream</label>
   </div>
   <div class="log" id="log">
@@ -166,6 +168,7 @@ const inp     = document.getElementById('inp');
 const go_     = document.getElementById('go');
 const mdl     = document.getElementById('mdl');
 const stm     = document.getElementById('stm');
+const balanceEl = document.getElementById('balance');
 let   welcome = document.getElementById('welcome');
 let   hist    = [];
 
@@ -195,6 +198,17 @@ function esc(s) {
     if (!mdl.options.length) mdl.innerHTML = '<option value="">no models</option>';
   } catch(e) { mdl.innerHTML = '<option value="">offline</option>'; }
 })();
+
+// ── wallet balance (next to stream) ─────────────────────────────────────────
+async function loadBalance() {
+  try {
+    const r = await fetch('/wallet/balance');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.balance_gnk != null) balanceEl.textContent = d.balance_gnk === '—' ? 'balance: —' : d.balance_gnk + ' GNK';
+  } catch(_) {}
+}
+loadBalance();
 
 // ── parse header ───────────────────────────────────────────────────────────
 // atob() only handles Latin-1; the JSON contains UTF-8 (e.g. «TOKEN» guillemets

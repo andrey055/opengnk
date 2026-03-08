@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,17 +23,24 @@ type Handler struct {
 	simulateToolCalls bool
 	sanitizer         *sanitize.Sanitizer // nil when sanitization is disabled
 
+	// walletBalance: first wallet address and chain REST API base URL for balance (Cosmos /cosmos/bank/...).
+	walletAddress string
+	chainRPCURL   string
+
 	mu     sync.RWMutex
 	models []json.RawMessage // cached raw model objects from upstream
 }
 
 // New creates a Handler and kicks off initial model loading.
 // Pass a non-nil sanitizer to enable request/response sanitization.
-func New(client *upstream.Client, simulateToolCalls bool, san *sanitize.Sanitizer) *Handler {
+// walletAddress and chainRPCURL are used for GET /wallet/balance (UI); pass empty to disable.
+func New(client *upstream.Client, simulateToolCalls bool, san *sanitize.Sanitizer, walletAddress, chainRPCURL string) *Handler {
 	h := &Handler{
 		client:            client,
 		simulateToolCalls: simulateToolCalls,
 		sanitizer:         san,
+		walletAddress:     strings.TrimSpace(walletAddress),
+		chainRPCURL:       strings.TrimRight(strings.TrimSpace(chainRPCURL), "/"),
 	}
 	go h.loadModels()
 	return h
@@ -42,6 +51,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", h.health)
 	mux.HandleFunc("GET /v1/models", h.listModels)
 	mux.HandleFunc("POST /v1/chat/completions", h.chatCompletions)
+	if h.walletAddress != "" && h.chainRPCURL != "" {
+		mux.HandleFunc("GET /wallet/balance", h.walletBalance)
+	}
 	mux.HandleFunc("GET /", h.serveUI)
 }
 
@@ -50,6 +62,52 @@ func (h *Handler) Register(mux *http.ServeMux) {
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+// walletBalance returns the first wallet's GNK balance from the Gonka chain REST API for the chat UI.
+func (h *Handler) walletBalance(w http.ResponseWriter, r *http.Request) {
+	// Cosmos bank balances: GET /cosmos/bank/v1beta1/balances/{address}
+	url := h.chainRPCURL + "/cosmos/bank/v1beta1/balances/" + h.walletAddress
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, url, nil)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "balance request: "+err.Error())
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		slog.Warn("wallet balance: chain RPC request failed", "err", err)
+		writeJSON(w, http.StatusOK, map[string]any{"balance_gnk": "—", "address": h.walletAddress})
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		Balances []struct {
+			Denom  string `json:"denom"`
+			Amount string `json:"amount"`
+		} `json:"balances"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		slog.Warn("wallet balance: decode failed", "err", err)
+		writeJSON(w, http.StatusOK, map[string]any{"balance_gnk": "—", "address": h.walletAddress})
+		return
+	}
+
+	// Gonka uses "ngonka" (1 GNK = 1e9 ngonka, nano-gonka).
+	var totalNgonka int64
+	for _, b := range result.Balances {
+		if b.Denom == "ngonka" {
+			n, _ := strconv.ParseInt(b.Amount, 10, 64)
+			totalNgonka += n
+		}
+	}
+	gnk := float64(totalNgonka) / 1e9
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"balance_gnk": strconv.FormatFloat(gnk, 'f', -1, 64),
+		"address":     h.walletAddress,
+	})
 }
 
 func (h *Handler) listModels(w http.ResponseWriter, _ *http.Request) {

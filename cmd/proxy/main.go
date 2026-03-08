@@ -82,7 +82,11 @@ func main() {
 		slog.Info("sanitization enabled", "classifiers", len(classifiers))
 	}
 
-	handler := api.New(client, cfg.SimulateToolCalls, san)
+	firstAddr := ""
+	if pool.Len() > 0 {
+		firstAddr = pool.All()[0].Address
+	}
+	handler := api.New(client, cfg.SimulateToolCalls, san, firstAddr, cfg.ChainAPIURL)
 
 	qm := quality.New()
 

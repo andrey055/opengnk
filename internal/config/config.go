@@ -24,6 +24,9 @@ type Cfg struct {
 	// Falls back to GONKA_ENDPOINT for backward compat.
 	SourceURL string // e.g. http://node2.gonka.ai:8000
 
+	// ChainAPIURL is the Gonka chain REST API base (for wallet balance). Defaults to SourceURL + /chain-api.
+	ChainAPIURL string // e.g. http://node1.gonka.ai:8000/chain-api
+
 	// Features
 	SimulateToolCalls bool // rewrite tool-call requests into plain prompts + parse JSON back
 
@@ -66,6 +69,14 @@ func Load() (*Cfg, error) {
 	sourceURL = strings.TrimRight(sourceURL, "/")
 	sourceURL = strings.TrimSuffix(sourceURL, "/v1")
 
+	// Chain API URL for balance queries (Cosmos REST: /cosmos/bank/v1beta1/balances/...).
+	// Gonka exposes this at /chain-api on the same port as the inference API.
+	chainAPIURL := strings.TrimSpace(os.Getenv("GONKA_CHAIN_API_URL"))
+	if chainAPIURL == "" {
+		chainAPIURL = sourceURL + "/chain-api"
+	}
+	chainAPIURL = strings.TrimRight(chainAPIURL, "/")
+
 	simTools := strings.TrimSpace(os.Getenv("SIMULATE_TOOL_CALLS"))
 	simulateToolCalls := simTools == "1" || strings.EqualFold(simTools, "true")
 
@@ -105,6 +116,7 @@ func Load() (*Cfg, error) {
 	return &Cfg{
 		Wallets:              wallets,
 		SourceURL:            sourceURL,
+		ChainAPIURL:          chainAPIURL,
 		SimulateToolCalls:    simulateToolCalls,
 		SanitizeEnabled:      sanitizeEnabled,
 		SanitizeNER:          sanitizeNER,
